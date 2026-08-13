@@ -12,9 +12,15 @@ enable_testing()
 
 add_library(uavlink STATIC
     libuavlink/src/crc.c
+    libuavlink/src/packet.c
 )
 target_include_directories(uavlink PUBLIC libuavlink/include)
 
 add_executable(test_crc libuavlink/tests/test_crc.c)
 target_link_libraries(test_crc PRIVATE uavlink)
 add_test(NAME crc COMMAND test_crc)
+
+
+add_executable(test_packet libuavlink/tests/test_packet.c)
+target_link_libraries(test_packet PRIVATE uavlink)
+add_test(NAME packet COMMAND test_packet)
