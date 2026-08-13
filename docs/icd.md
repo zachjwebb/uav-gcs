@@ -59,25 +59,39 @@ Present at the start of every packet regardless of message type.
 
 ## 4. COMMAND Payload
 
+Payload offsets are relative to the start of the payload (absolute offset = `8 + payload offset`).
+
 | Offset | Size | Type | Field | Units | Encoding | Valid range | Notes |
 | -----: | ---: | ---- | ----- | ----- | -------- | ----------- | ----- |
-| 0 | 4 | `uint32_t` | session_id | n/a | unsigned, BE | `0`–`4294967295` | `CMD-005` |
+| 0 | 4 | `uint32_t` | session_id | n/a | unsigned, unscaled, BE | `0`–`4294967295` | `CMD-005` |
 | 4 | 1 | `uint8_t` | cmd_type | n/a | enum | `0`–`4` | See 7.3 |
-| 5 | 4 | `int32_t` | param1 | varies | signed, BE | see 7.3 | Meaning depends on `cmd_type` |
-| 9 | 4 | `int32_t` | param2 | varies | signed, BE | see 7.3 | Unused params encoded as `0` |
-| 13 | 4 | `int32_t` | param3 | varies | signed, BE | see 7.3 | Unused params encoded as `0` |
+| 5 | 4 | `int32_t` | param1 | varies | signed, scaled, BE | see 7.3 | Meaning depends on `cmd_type` |
+| 9 | 4 | `int32_t` | param2 | varies | signed, scaled, BE | see 7.3 | Meaning depends on `cmd_type` |
+| 13 | 4 | `int32_t` | param3 | varies | signed, scaled, BE | see 7.3 | Meaning depends on `cmd_type` |
 
-**Payload size: 17 bytes. Total packet: 8 + 17 + 2 = 27 bytes.**
+**Payload size: 17 bytes**
+**Total packet size: 8 + 17 + 2 = 27 bytes**
+
+The command's sequence number is carried in the common header (`seq`), not in the payload.
+Unused parameters shall be set to `0` on encode and ignored on decode.
 
 ---
 
 ## 5. HEARTBEAT Payload
 
-No payload. `payload_len = 0`. Total packet: 8 + 0 + 2 = 10 bytes.
+| Offset | Size | Type | Field | Units | Encoding | Valid range | Notes |
+| -----: | ---: | ---- | ----- | ----- | -------- | ----------- | ----- |
+| — | — | — | — | — | — | — | No payload fields |
 
-The arrival of the heartbeat is itself the information (`SYS-005`); no additional content is
-required to establish ground-station liveness. This is the minimum-size packet the protocol
-can produce and therefore defines the decoder's minimum length check.
+**Payload size: 0 bytes**
+**Total packet size: 8 + 0 + 2 = 10 bytes**
+
+A heartbeat carries no data because its arrival is itself the information. The vehicle
+requires only evidence that the ground station is reachable (`SIM-002`), which the packet's
+existence provides. The common header supplies liveness ordering via `seq`.
+
+This makes `payload_len = 0` legal, and 10 bytes the minimum possible packet size — the
+lower bound the decoder checks before reading any length field.
 
 ---
 
@@ -85,14 +99,16 @@ can produce and therefore defines the decoder's minimum length check.
 
 | Offset | Size | Type | Field | Units | Encoding | Valid range | Notes |
 | -----: | ---: | ---- | ----- | ----- | -------- | ----------- | ----- |
-| 0 | 4 | `uint32_t` | session_id | n/a | unsigned, BE | `0`–`4294967295` | Echoed from command (`CMD-001`) |
-| 4 | 4 | `uint32_t` | ack_seq | n/a | unsigned, BE | `0`–`4294967295` | Echoed from command (`CMD-001`) |
-| 8 | 1 | `uint8_t` | reason_code | n/a | enum | `0`–`3` | See 7.4 |
+| 0 | 4 | `uint32_t` | session_id | n/a | unsigned, unscaled, BE | `0`–`4294967295` | Echoes the command's session (`CMD-001`) |
+| 4 | 4 | `uint32_t` | ack_seq | n/a | unsigned, unscaled, BE | `0`–`4294967295` | Echoes the command's header `seq` (`CMD-001`) |
+| 8 | 1 | `uint8_t` | reason_code | n/a | enum | `0`–`4` | See 7.4. `0` on ACK |
 
-**Payload size: 9 bytes. Total packet: 8 + 9 + 2 = 19 bytes.**
+**Payload size: 9 bytes**
+**Total packet size: 8 + 9 + 2 = 19 bytes**
 
-ACK and NACK share an identical payload layout and are distinguished by `msg_type` in the
-header. `reason_code` is `0` (`ACCEPTED`) in an ACK and non-zero in a NACK.
+ACK and NACK share an identical payload layout and are distinguished by `msg_type`. The
+echoed `session_id` and `ack_seq` are what allow `gcs-cmd` to correlate a response with the
+command that produced it, rather than assuming responses arrive in order.
 
 ---
 
@@ -100,29 +116,29 @@ header. `reason_code` is `0` (`ACCEPTED`) in an ACK and non-zero in a NACK.
 
 ### 7.1 Message Type (`msg_type`)
 
-| Value | Name | Direction | Payload size |
-| ----: | ---- | --------- | -----------: |
-| 1 | `TELEMETRY` | `uav-sim` → `gcs` | 33 |
-| 2 | `COMMAND` | `gcs-cmd` → `uav-sim` | 17 |
-| 3 | `HEARTBEAT` | `gcs` → `uav-sim` | 0 |
-| 4 | `ACK` | `uav-sim` → `gcs-cmd` | 9 |
-| 5 | `NACK` | `uav-sim` → `gcs-cmd` | 9 |
+| Value | Name | Direction |
+| ----: | ---- | --------- |
+| 0 | *(invalid)* | — |
+| 1 | `TELEMETRY` | `uav-sim` → `gcs` |
+| 2 | `COMMAND` | `gcs-cmd` → `uav-sim` |
+| 3 | `HEARTBEAT` | `gcs` → `uav-sim` |
+| 4 | `ACK` | `uav-sim` → `gcs-cmd` |
+| 5 | `NACK` | `uav-sim` → `gcs-cmd` |
 
-Value `0` is not assigned, so an all-zero datagram is rejected by the message-type check.
+Value `0` is deliberately unassigned so that an all-zero buffer is rejected as malformed
+rather than being interpreted as a valid message type.
 
 ### 7.2 Flight Mode (`flight_mode`)
 
-| Value | Name | Flying mode |
-| ----: | ---- | ----------- |
-| 0 | `BOOT` | no |
-| 1 | `PREFLIGHT` | no |
-| 2 | `ARMED` | yes |
-| 3 | `AUTO` | yes |
-| 4 | `RTL` | yes |
-| 5 | `LANDING` | yes |
-| 6 | `LANDED` | no |
-
-Flying-mode classification per `SIM-004`.
+| Value | Name | Flying mode (`SIM-004`) |
+| ----: | ---- | ----------------------- |
+| 0 | `BOOT` | No |
+| 1 | `PREFLIGHT` | No |
+| 2 | `ARMED` | Yes |
+| 3 | `AUTO` | Yes |
+| 4 | `RTL` | Yes |
+| 5 | `LANDING` | Yes |
+| 6 | `LANDED` | No |
 
 ### 7.3 Command Type (`cmd_type`)
 
@@ -131,20 +147,21 @@ Flying-mode classification per `SIM-004`.
 | 0 | `ARM` | unused (`0`) | unused (`0`) | unused (`0`) |
 | 1 | `DISARM` | unused (`0`) | unused (`0`) | unused (`0`) |
 | 2 | `SET_MODE` | target mode (`0`–`6`) | unused (`0`) | unused (`0`) |
-| 3 | `GOTO_WAYPOINT` | latitude, ×10⁷ | longitude, ×10⁷ | altitude AMSL, ×100 |
+| 3 | `GOTO_WAYPOINT` | latitude ×10⁷ | longitude ×10⁷ | altitude AMSL ×100 |
 | 4 | `RTL` | unused (`0`) | unused (`0`) | unused (`0`) |
 
-Waypoint parameters use the same scale factors as the corresponding telemetry fields so that
-a single conversion routine serves both directions.
+Parameter scale factors match the corresponding telemetry fields so that a waypoint and a
+reported position use identical encoding.
 
 ### 7.4 NACK Reason Code (`reason_code`)
 
 | Value | Name | Source requirement |
 | ----: | ---- | ------------------ |
-| 0 | `ACCEPTED` | `CMD-001` (ACK only) |
+| 0 | `ACCEPTED` | Used in `ACK` only |
 | 1 | `UNKNOWN_COMMAND` | `CMD-004` |
 | 2 | `ILLEGAL_TRANSITION` | `SIM-001` |
 | 3 | `STALE_SEQUENCE` | `CMD-006` |
+| 4 | `INVALID_PARAM` | `TM-007` range rules applied to command parameters |
 
 ### 7.5 GPS Fix Type (`gps_fix_type`)
 
@@ -153,7 +170,7 @@ a single conversion routine serves both directions.
 | 0 | `NO_FIX` | No position solution |
 | 1 | `FIX_2D` | Horizontal position only |
 | 2 | `FIX_3D` | Horizontal and vertical position |
-| 3 | `FIX_RTK` | Real-time kinematic, centimetre-level |
+| 3 | `RTK` | Real-time kinematic, centimetre-class |
 
 ---
 
@@ -161,79 +178,117 @@ a single conversion routine serves both directions.
 
 ### 8.1 Field ordering
 
-Fields are ordered largest-first within each payload. On the wire this has no effect on size,
-because explicit byte-by-byte serialisation inserts no padding. The ordering exists so that the
-corresponding in-memory structures are naturally compact under the platform ABI, and so that a
-hex dump is readable in aligned groups.
+Fields are grouped by function — time, position, velocity, attitude, vehicle health, mode —
+so that a hex dump can be read against this document without counting bytes. Within the
+payload, ordering does not affect packet size, because explicit byte-by-byte serialization
+inserts no padding. Ordering largest-to-smallest is nonetheless retained so that the
+corresponding in-memory C structure is also compact, avoiding compiler-inserted padding
+between fields.
 
 ### 8.2 Scaled integers versus floating point
 
-All physical quantities are transmitted as scaled integers rather than IEEE 754 floats. Integer
-encoding is bit-exact across compilers and architectures, requires no assumption about
-floating-point representation, and permits explicit range validation on the wire value. The cost
-is a fixed resolution per field, chosen below to exceed the precision the underlying quantity can
-meaningfully carry.
+All non-integer quantities are transmitted as scaled integers rather than IEEE 754 floats.
+Scaled integers have an identical representation on every architecture and require no
+assumption about the host's floating-point format, whereas transmitting a float requires
+either a strict-aliasing violation or a `memcpy` through an integer and an assumption that
+both endpoints implement IEEE 754.
 
-| Field | Encoding | Scale | Resolution | Rationale |
-| ----- | -------- | ----- | ---------- | --------- |
-| latitude / longitude | `int32_t` | ×10⁷ | ~1.1 cm | Sub-metre positioning; ±1.8×10⁹ fits `int32_t` (max 2.147×10⁹) |
-| altitude AMSL | `int32_t` | ×100 | 1 cm | Adequate for altitude hold; finer would be false precision |
-| ground / vertical speed | `int16_t`, `uint16_t` | ×100 | 0.01 m/s | Below the noise floor of any real airspeed sensor |
-| heading, roll, pitch | `int16_t`, `uint16_t` | ×100 | 0.01° | Smooth attitude display without float encoding |
-| battery voltage | `uint16_t` | ×1000 | 1 mV | Cell-level voltage monitoring resolution |
-| battery percentage | `uint8_t` | none | 1% | Sub-percent battery estimates are not physically meaningful |
+| Field | Type | Scale | Resolution | Rationale |
+| ----- | ---- | ----- | ---------- | --------- |
+| latitude, longitude | `int32_t` | ×10⁷ | ~1.1 cm | Sub-metre positioning; ±1.8×10⁹ fits `int32_t` (max 2.147×10⁹) |
+| altitude_amsl | `int32_t` | ×100 | 1 cm | Adequate for altitude hold; finer resolution would be false precision |
+| ground_speed, vertical_speed | `int16_t` / `uint16_t` | ×100 | 0.01 m/s | Below the noise floor of any real airspeed or barometric sensor |
+| heading, roll, pitch | `int16_t` / `uint16_t` | ×100 | 0.01° | Smooth attitude display without float encoding |
+| battery_voltage | `uint16_t` | ×1000 | 1 mV | Cell-level voltage monitoring; 0–30 V covers 3S–6S packs |
+| battery_pct | `uint8_t` | none | 1% | Sub-percent battery estimates are not physically meaningful |
+| gps_sat_count | `uint8_t` | none | 1 | Integer count |
 
 ### 8.3 Timestamp representation
 
-`timestamp_ms` is milliseconds since vehicle boot, encoded as `uint32_t`, wrapping after
-`2³² / 1000 / 86400 ≈ 49.7 days` of continuous operation. No plausible flight approaches this,
-so wraparound handling is out of scope. Time since boot is used rather than Unix epoch
-milliseconds because the vehicle has no wall-clock source, and epoch milliseconds would require
-`uint64_t`, doubling the field width for information the vehicle does not possess.
+`timestamp_ms` is a `uint32_t` counting milliseconds since vehicle boot, sourced from a
+monotonic clock.
 
-A consequence is that absolute one-way latency cannot be computed, because vehicle and ground
-clocks share no epoch. `OPS-001` therefore records a ground receive timestamp alongside the
-vehicle timestamp; the pair yields inter-arrival jitter and relative timing, which is what the
-performance analysis requires. Measuring true one-way latency would require clock
-synchronisation, which is outside the scope of this project.
+```
+2^32 - 1 = 4,294,967,295 ms
+         ÷ 1000   = 4,294,967 s
+         ÷ 3600   = 1,193 h
+         ÷ 24     = 49.7 days
+```
+
+Wraparound occurs after 49.7 days of continuous vehicle uptime, which no flight approaches.
+A `uint64_t` would be required only for a wall-clock epoch representation, which is
+deliberately not used: it would require the vehicle to know absolute time, and this system
+has no clock-synchronisation mechanism.
+
+**Consequence for latency measurement.** Because vehicle and ground clocks are not
+synchronised, the difference between `timestamp_ms` and the ground receive timestamp
+recorded under `OPS-001` is not a valid one-way latency measurement. What the pair does
+support is inter-arrival jitter and relative latency variation, which is what the
+performance analysis in Phase 9 reports. Absolute one-way latency would require either
+clock synchronisation or a round-trip measurement.
 
 ### 8.4 Fixed versus variable payload
 
-Each message type has a fixed payload layout; variability exists only between types, resolved by
-`msg_type` in the common header. This permits the decoder to validate the declared
-`payload_len` against the expected length for the type before interpreting any payload byte.
-The alternative, a type-length-value payload, would be more extensible but would require the
-parser to iterate over untrusted length fields, enlarging the attack surface that `SYS-004`
-constrains.
+Each message type has a fixed payload layout, selected by `msg_type` in the common header.
+The payload length varies between message types but not within one.
+
+This trades extensibility for simplicity: adding a field to an existing message type
+requires a protocol version increment, whereas a type-length-value scheme would allow
+fields to be added without breaking older receivers. The fixed layout was chosen because it
+makes the decoder's bounds checking straightforward — the expected length for a given
+`msg_type` is a compile-time constant that can be compared against `payload_len` before any
+field is read, which directly supports `SYS-004`.
 
 ### 8.5 Reserved space and extensibility
 
-Byte 7 of the header is reserved. Encoders write `0x00`; decoders accept any value and ignore it.
-This asymmetry is deliberate: a version 1 decoder that rejected non-zero reserved bytes would
-make the field unusable by a future version 2 sender, defeating its purpose. It is a considered
-exception to the system's general posture of rejecting unexpected input — the field is defined as
-carrying no meaning in version 1, so skipping it is safe. `status_flags` bits 1–7 are reserved on
-the same terms.
+Header byte 7 is reserved. It is written as `0x00` on encode and **ignored** on decode.
 
-### 8.6 Frame synchronisation
+This is a deliberate exception to the system's general policy of rejecting unexpected
+input. A version 1 decoder that rejected a non-zero reserved byte would make the field
+useless as an extension point, because a future version 2 sender using it could not
+interoperate with version 1 receivers. The general rule is therefore "reject what cannot be
+safely interpreted"; a byte designated as carrying no meaning is safe to skip.
 
-No sync or magic byte is present. Frame synchronisation exists to locate message boundaries in a
-continuous byte stream; UDP is datagram-oriented and delivers whole messages, so a packet always
-begins at offset 0. The version and message-type fields together reject foreign traffic on a
-shared port at negligible cost.
+`status_flags` bits 1–7 follow the same convention: written as `0`, ignored on decode.
 
-### 8.7 Decode ordering constraint
+### 8.6 Absence of a synchronisation marker
 
-`payload_len` determines the CRC offset, so it must be validated before the CRC can be located.
-The decoder therefore performs checks in a fixed order:
+The protocol has no sync or magic byte. Sync markers exist to locate frame boundaries
+within a continuous byte stream, as on a serial link. UDP is datagram-oriented — `recvfrom`
+returns a complete datagram or nothing — so a packet always begins at byte 0 and the
+framing problem a sync marker solves does not arise.
 
-1. Reject if received length < 10 bytes (minimum packet: 8 header + 0 payload + 2 CRC)
-2. Reject if `version != 1` (`FMT-001`)
-3. Reject if `msg_type` is not 1–5 (`FMT-006`)
-4. Reject if `8 + payload_len + 2 != bytes_received` (`FMT-002`)
-5. Reject if `payload_len` does not match the expected length for `msg_type`
-6. Reject if computed CRC over bytes `0 .. 7 + payload_len` != transmitted CRC (`FMT-003`)
-7. Only then interpret payload fields
+Rejection of foreign traffic arriving on a shared port is provided instead by the version
+field (`FMT-001`), the message type field (`FMT-006`, where `0` is invalid), and the CRC
+(`FMT-003`).
 
-Performing step 6 before step 4 would compute a CRC offset from an unvalidated length field and
-read beyond the supplied buffer, violating `SYS-004`.
+### 8.7 Decoder validation order
+
+`payload_len` counts payload bytes only, excluding the 8-byte header and 2-byte CRC. Because
+the CRC's location is derived from `payload_len`, the field must be validated before the CRC
+can be located. The decoder therefore validates in this fixed order, and no step may read
+bytes whose presence has not yet been established:
+
+1. Received length ≥ 10 (minimum packet: 8 header + 0 payload + 2 CRC)
+2. `version` == 1 (`FMT-001`)
+3. `msg_type` in 1–5 (`FMT-006`)
+4. `payload_len` ≤ 246, and `8 + payload_len + 2` == bytes received (`FMT-002`)
+5. `payload_len` equals the fixed length defined for this `msg_type`
+6. CRC over bytes `0` .. `(8 + payload_len - 1)` equals the transmitted CRC (`FMT-003`)
+7. Only then, interpret payload fields
+
+Step 4 is what prevents a crafted `payload_len` from directing a read beyond the supplied
+buffer, and is the primary defence verified by the fuzz testing required under `SYS-004`.
+
+---
+
+## 9. Packet Size Summary
+
+| Message type | Header | Payload | CRC | Total |
+| ------------ | -----: | ------: | --: | ----: |
+| `TELEMETRY` | 8 | 33 | 2 | **43** |
+| `COMMAND` | 8 | 17 | 2 | **27** |
+| `HEARTBEAT` | 8 | 0 | 2 | **10** |
+| `ACK` / `NACK` | 8 | 9 | 2 | **19** |
+
+Telemetry at 50 Hz consumes 43 × 50 = 2,150 bytes/s ≈ **17.2 kbps** before UDP/IP overhead
