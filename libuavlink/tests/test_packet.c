@@ -143,6 +143,11 @@ int main(void) {
     test_byte_order();
     test_reserved_byte();
     test_rejection();
+
+    if (failures != 0) {
+        fprintf(stderr, "=== %d check(s) FAILED ===\n", failures);
+        return 1;
+    }
     
     printf("=== All UAVLink Packet Tests Passed Successfully ===\n");
     return 0;
