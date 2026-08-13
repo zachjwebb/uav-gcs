@@ -85,6 +85,7 @@ const char *uavlink_strerror(uavlink_result_t r) {
         case UAVLINK_ERR_LENGTH:           return "UAVLINK_ERR_LENGTH";
         case UAVLINK_ERR_CRC:              return "UAVLINK_ERR_CRC";
         case UAVLINK_ERR_TRUNCATED:        return "UAVLINK_ERR_TRUNCATED";
+        case UAVLINK_ERR_TRAILING_DATA:    return "UAVLINK_ERR_TRAILING_DATA";
         default:                           return "UNKNOWN_UAVLINK_ERROR";
     }
 }
