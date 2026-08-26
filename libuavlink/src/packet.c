@@ -86,6 +86,61 @@ const char *uavlink_strerror(uavlink_result_t r) {
         case UAVLINK_ERR_CRC:              return "UAVLINK_ERR_CRC";
         case UAVLINK_ERR_TRUNCATED:        return "UAVLINK_ERR_TRUNCATED";
         case UAVLINK_ERR_TRAILING_DATA:    return "UAVLINK_ERR_TRAILING_DATA";
+        case UAVLINK_ERR_ENUM:             return "UAVLINK_ERR_ENUM";
         default:                           return "UNKNOWN_UAVLINK_ERROR";
     }
 }
+
+uavlink_result_t uavlink_encode_telemetry(const uavlink_telemetry_t *tm, uint8_t *buf, size_t buf_len) {
+
+    if (tm == NULL || buf == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
+
+    if (buf_len < UAVLINK_TELEMETRY_PAYLOAD_SIZE) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
+
+    if (tm->flight_mode > UAVLINK_MODE_LANDED) {
+        return UAVLINK_ERR_ENUM;
+    }
+
+    if (tm->gps_fix_type > UAVLINK_GPS_FIX_RTK) {
+        return UAVLINK_ERR_ENUM;
+    }
+
+    put_u32(&buf[0],  tm->timestamp_ms);
+    put_u32(&buf[4],  (uint32_t)tm->latitude);
+    put_u32(&buf[8],  (uint32_t)tm->longitude);
+    put_u32(&buf[12], (uint32_t)tm->altitude_amsl);
+    put_u16(&buf[16], tm->ground_speed);
+    put_u16(&buf[18], (uint16_t)tm->vertical_speed);
+    put_u16(&buf[20], tm->heading);
+    put_u16(&buf[22], (uint16_t)tm->roll);
+    put_u16(&buf[24], (uint16_t)tm->pitch);
+    put_u16(&buf[26], tm->battery_voltage);
+    buf[28] = tm->battery_pct;
+    buf[29] = tm->gps_fix_type;
+    buf[30] = tm->gps_sat_count;
+    buf[31] = tm->flight_mode;
+
+    return UAVLINK_OK;
+
+}
+
+uavlink_result_t uavlink_decode_telemetry(const uint8_t *buf, size_t buf_len, uavlink_telemetry_t *tm) {
+
+}
+
+static void put_u32(uint8_t *b, uint32_t v) {
+    b[0] = (uint8_t)(v >> 24);
+    b[1] = (uint8_t)(v >> 16);
+    b[2] = (uint8_t)(v >>  8);
+    b[3] = (uint8_t)(v);
+}
+
+static void put_u16(uint8_t *b, uint16_t v) {
+    b[0] = (uint8_t)(v >> 8);
+    b[1] = (uint8_t)(v);
+}
+

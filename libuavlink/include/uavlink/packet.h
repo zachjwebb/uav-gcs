@@ -28,7 +28,8 @@ typedef enum {
     UAVLINK_ERR_LENGTH,         /* FMT-002 */
     UAVLINK_ERR_CRC,            /* FMT-003 */
     UAVLINK_ERR_TRUNCATED,      /* declared length exceeds bytes supplied */
-    UAVLINK_ERR_TRAILING_DATA   /* extra bytes after declared length */
+    UAVLINK_ERR_TRAILING_DATA,   /* extra bytes after declared length */
+    UAVLINK_ERR_ENUM             /* invalid enum value */
 } uavlink_result_t;
 
 typedef enum {
@@ -97,4 +98,4 @@ uavlink_result_t uavlink_encode_telemetry(const uavlink_telemetry_t *tm, uint8_t
 
 uavlink_result_t uavlink_decode_telemetry(const uint8_t *buf, size_t buf_len, uavlink_telemetry_t *tm);
 
-#endif
+#endif 
