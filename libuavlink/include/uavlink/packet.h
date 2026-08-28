@@ -40,13 +40,6 @@ typedef enum {
     UAVLINK_MSG_NACK      = 5
 } uavlink_msg_type_t;
 
-typedef struct {
-    uint8_t  version;
-    uint8_t  msg_type;
-    uint32_t seq;
-    uint8_t  payload_len;
-} uavlink_header_t;
-
 typedef enum {
     UAVLINK_GPS_FIX_NONE = 0,
     UAVLINK_GPS_FIX_2D   = 1,
@@ -63,6 +56,22 @@ typedef enum {
     UAVLINK_MODE_LANDING   = 5,
     UAVLINK_MODE_LANDED    = 6
 } uavlink_flight_mode_t;
+
+typedef enum {
+    UAVLINK_CMD_ARM           = 0,
+    UAVLINK_CMD_DISARM        = 1,
+    UAVLINK_CMD_SET_MODE      = 2,
+    UAVLINK_CMD_GOTO_WAYPOINT = 3,
+    UAVLINK_CMD_RTL           = 4
+} uavlink_cmd_type_t;
+
+typedef enum {
+    UAVLINK_ACK_ACCEPTED           = 0,
+    UAVLINK_ACK_UNKNOWN_COMMAND    = 1,
+    UAVLINK_ACK_ILLEGAL_TRANSITION = 2,
+    UAVLINK_ACK_STALE_SEQUENCE     = 3,
+    UAVLINK_ACK_INVALID_PARAM      = 4
+} uavlink_reason_code_t;
 
 typedef struct {
     uint32_t timestamp_ms;
@@ -82,6 +91,37 @@ typedef struct {
     uint8_t status_flags;
 } uavlink_telemetry_t;
 
+typedef struct {
+    uint8_t  version;
+    uint8_t  msg_type;
+    uint32_t seq;
+    uint8_t  payload_len;
+} uavlink_header_t;
+
+typedef struct {
+    uint32_t  session_id;
+    uint8_t  cmd_type;
+    int32_t param1;
+    int32_t param2;
+    int32_t param3;
+} uavlink_command_t;
+
+typedef struct {
+    uint32_t  session_id;
+    uint32_t  ack_seq;
+    uint8_t  reason_code;
+} uavlink_ack_t;
+
+typedef struct {
+    uavlink_header_t header;
+    union { 
+        uavlink_telemetry_t telemetry;
+        uavlink_command_t command;
+        uavlink_ack_t ack;
+    } payload;
+} uavlink_packet_t;
+
+
 /* Encodes hdr into buf as UAVLINK_HEADER_SIZE big-endian bytes.
  * Reserved byte 7 is written as 0x00.
  * Returns UAVLINK_ERR_BUFFER_TOO_SMALL if buf_len < UAVLINK_HEADER_SIZE. */
@@ -97,5 +137,17 @@ const char *uavlink_strerror(uavlink_result_t r);
 uavlink_result_t uavlink_encode_telemetry(const uavlink_telemetry_t *tm, uint8_t *buf, size_t buf_len);
 
 uavlink_result_t uavlink_decode_telemetry(const uint8_t *buf, size_t buf_len, uavlink_telemetry_t *tm);
+
+uavlink_result_t uavlink_encode_command(const uavlink_command_t *cmd, uint8_t *buf, size_t buf_len);
+
+uavlink_result_t uavlink_decode_command(const uint8_t *buf, size_t buf_len, uavlink_command_t *cmd);
+
+uavlink_result_t uavlink_encode_ack(const uavlink_ack_t *ack, uint8_t *buf, size_t buf_len);
+
+uavlink_result_t uavlink_decode_ack(const uint8_t *buf, size_t buf_len, uavlink_ack_t *ack);
+
+uavlink_result_t uavlink_encode_packet(const uavlink_packet_t *pkt, const uint8_t *buf, size_t buf_len, size_t *packet_len);
+
+uavlink_result_t uavlink_decode_packet(const uint8_t *buf, size_t buf_len, uavlink_packet_t *pkt);
 
 #endif 

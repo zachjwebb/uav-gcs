@@ -186,3 +186,21 @@ uavlink_result_t uavlink_decode_telemetry(const uint8_t *buf, size_t buf_len, ua
 
 }
 
+// uavlink_result_t uavlink_encode_command(const uavlink_command_t *cmd, uint8_t *buf, size_t buf_len);
+
+// uavlink_result_t uavlink_decode_command(const uint8_t *buf, size_t buf_len, uavlink_command_t *cmd);
+
+// uavlink_result_t uavlink_encode_ack(const uavlink_ack_t *ack, uint8_t *buf, size_t buf_len);
+
+// uavlink_result_t uavlink_decode_ack(const uint8_t *buf, size_t buf_len, uavlink_ack_t *ack);
+
+//uavlink_result_t uavlink_encode_packet(const uavlink_packet_t *pkt, const uint8_t *buf, size_t buf_len, size_t *packet_len){
+
+
+
+//}
+
+//uavlink_result_t uavlink_decode_packet(const uint8_t *buf, size_t buf_len, uavlink_packet_t *pkt) {
+
+//}
+
