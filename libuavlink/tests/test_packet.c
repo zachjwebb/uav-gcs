@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <uavlink/packet.h>
+#include <limits.h>
 
 static int failures = 0;
 
@@ -237,6 +238,99 @@ void test_telemetry_wire_layout(void) {
     printf("Pass: test_telemetry_layout\n");
 }
 
+/* Test 7: Signed extremes. Two's-complement conversion bugs surface
+ * at the limits, not at ordinary values. */
+void test_telemetry_signed_extremes(void) {
+
+    uavlink_telemetry_t tm = make_telemetry();
+    uint8_t buf[UAVLINK_TELEMETRY_PAYLOAD_SIZE];
+    uavlink_telemetry_t decoded;
+
+    tm.latitude = -1;
+    tm.longitude = INT32_MIN;
+    tm.altitude_amsl = INT32_MAX;
+    tm.roll = INT16_MIN;
+    tm.pitch = INT16_MIN;
+    tm.vertical_speed = -1;
+
+    CHECK(uavlink_encode_telemetry(&tm, buf, sizeof(buf)) == UAVLINK_OK);
+    CHECK(uavlink_decode_telemetry(buf, sizeof(buf), &decoded) == UAVLINK_OK);
+
+    CHECK(decoded.latitude == -1);
+    CHECK(decoded.longitude == INT32_MIN);
+    CHECK(decoded.altitude_amsl == INT32_MAX);
+    CHECK(decoded.roll == INT16_MIN);
+    CHECK(decoded.pitch == INT16_MIN);
+    CHECK(decoded.vertical_speed == -1);
+
+    CHECK(buf[4] == 0xFF);
+    CHECK(buf[5] == 0xFF);
+    CHECK(buf[6] == 0xFF);
+    CHECK(buf[7] == 0xFF);
+
+    printf("Pass: test_telemetry_signed_extremes\n");
+
+}
+
+/* Test 8: Buffer bounds and NULL arguments.
+ * Exact-size buffers must succeed; one byte short must fail. */
+void test_telemetry_bounds(void) {
+
+    uavlink_telemetry_t tm = make_telemetry();
+    uavlink_telemetry_t decoded;
+    uint8_t exact[UAVLINK_TELEMETRY_PAYLOAD_SIZE];
+    uint8_t small[UAVLINK_TELEMETRY_PAYLOAD_SIZE - 1];
+
+    CHECK(uavlink_encode_telemetry(&tm, exact, sizeof(exact)) == UAVLINK_OK);
+    CHECK(uavlink_decode_telemetry(exact, sizeof(exact), &decoded) == UAVLINK_OK);
+
+    CHECK(uavlink_encode_telemetry(&tm, small, sizeof(small)) == UAVLINK_ERR_BUFFER_TOO_SMALL);
+    CHECK(uavlink_decode_telemetry(exact, sizeof(small), &decoded) == UAVLINK_ERR_BUFFER_TOO_SMALL);
+
+    CHECK(uavlink_encode_telemetry(NULL, exact, sizeof(exact)) == UAVLINK_ERR_NULL);
+    CHECK(uavlink_encode_telemetry(&tm, NULL, sizeof(exact))   == UAVLINK_ERR_NULL);
+    CHECK(uavlink_decode_telemetry(NULL, sizeof(exact), &decoded) == UAVLINK_ERR_NULL);
+    CHECK(uavlink_decode_telemetry(exact, sizeof(exact), NULL)    == UAVLINK_ERR_NULL);
+
+    printf("Pass: test_telemetry_bounds\n");
+
+}
+
+/* Test 9: Protocol enum rejection, and the commit-on-success invariant:
+ * a failed decode must leave the caller's struct untouched. */
+void test_telemetry_enum_rejection(void) {
+
+    uavlink_telemetry_t tm = make_telemetry();
+    uint8_t buf[UAVLINK_TELEMETRY_PAYLOAD_SIZE];
+
+    /* encode side */
+    tm.flight_mode = UAVLINK_MODE_LANDED + 1;
+    CHECK(uavlink_encode_telemetry(&tm, buf, sizeof(buf)) == UAVLINK_ERR_ENUM);
+
+    tm = make_telemetry();
+    tm.gps_fix_type = UAVLINK_GPS_FIX_RTK + 1;
+    CHECK(uavlink_encode_telemetry(&tm, buf, sizeof(buf)) == UAVLINK_ERR_ENUM);
+
+    /* decode side: corrupt a valid packet */
+    tm = make_telemetry();
+    CHECK(uavlink_encode_telemetry(&tm, buf, sizeof(buf)) == UAVLINK_OK);
+
+    uavlink_telemetry_t out;
+    memset(&out, 0x5A, sizeof(out));
+
+    buf[31] = 200;   /* invalid flight_mode */
+    CHECK(uavlink_decode_telemetry(buf, sizeof(buf), &out) == UAVLINK_ERR_ENUM);
+    CHECK(out.latitude == (int32_t)0x5A5A5A5A);   /* untouched */
+
+    buf[31] = UAVLINK_MODE_AUTO;
+    buf[29] = 99;    /* invalid gps_fix_type */
+    CHECK(uavlink_decode_telemetry(buf, sizeof(buf), &out) == UAVLINK_ERR_ENUM);
+    CHECK(out.latitude == (int32_t)0x5A5A5A5A);
+
+    printf("Pass: test_telemetry_enum_rejection\n");
+
+}
+
 int main(void) {
     printf("=== Starting UAVLink Packet Tests ===\n");
     
@@ -246,6 +340,8 @@ int main(void) {
     test_rejection();
     test_telemetry_round_trip();
     test_telemetry_wire_layout();
+    test_telemetry_signed_extremes();
+    test_telemetry_bounds();
 
     if (failures != 0) {
         fprintf(stderr, "=== %d check(s) FAILED ===\n", failures);
