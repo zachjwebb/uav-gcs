@@ -13,6 +13,28 @@ static int failures = 0;
     } \
 } while (0)
 
+/* ---- Telemetry test fixture: every field distinct ---- */
+static uavlink_telemetry_t make_telemetry(void) {
+    uavlink_telemetry_t tm = {
+        .timestamp_ms    = 123456789,
+        .latitude        = 451234567,
+        .longitude       = -1229876543,
+        .altitude_amsl   = 12345,
+        .ground_speed    = 1550,
+        .vertical_speed  = -250,
+        .heading         = 27050,
+        .roll            = -1500,
+        .pitch           = 500,
+        .battery_voltage = 22200,
+        .battery_pct     = 87,
+        .gps_fix_type    = UAVLINK_GPS_FIX_3D,
+        .gps_sat_count   = 14,
+        .flight_mode     = UAVLINK_MODE_AUTO,
+        .status_flags    = UAVLINK_STATUS_ARMED
+    };
+    return tm;
+}
+
 /* Test 1: Round-trip validation 
  * Builds a valid header, encodes it, decodes it, and CHECKs that 
  * all four fields perfectly match the original values. */
@@ -136,6 +158,85 @@ void test_rejection(void) {
     printf("Pass: test_rejection\n");
 }
 
+/* Test 5: Telemetry round-trip.
+ * Every field holds a distinct value so that a swapped-offset bug
+ * cannot round-trip cleanly. Four fields are negative to exercise
+ * the signed -> unsigned -> signed conversion path. */
+void test_telemetry_round_trip(void) {
+
+    uavlink_telemetry_t original = make_telemetry();
+    uint8_t buf[UAVLINK_TELEMETRY_PAYLOAD_SIZE];
+
+    CHECK(uavlink_encode_telemetry(&original, buf, sizeof(buf)) == UAVLINK_OK);
+    
+
+    uavlink_telemetry_t decoded;
+    CHECK(uavlink_decode_telemetry(buf, sizeof(buf), &decoded) == UAVLINK_OK);
+
+    CHECK(decoded.timestamp_ms    == original.timestamp_ms);
+    CHECK(decoded.latitude        == original.latitude);
+    CHECK(decoded.longitude       == original.longitude);
+    CHECK(decoded.altitude_amsl   == original.altitude_amsl);
+    CHECK(decoded.ground_speed    == original.ground_speed);
+    CHECK(decoded.vertical_speed  == original.vertical_speed);
+    CHECK(decoded.heading         == original.heading);
+    CHECK(decoded.roll            == original.roll);
+    CHECK(decoded.pitch           == original.pitch);
+    CHECK(decoded.battery_voltage == original.battery_voltage);
+    CHECK(decoded.battery_pct     == original.battery_pct);
+    CHECK(decoded.gps_fix_type    == original.gps_fix_type);
+    CHECK(decoded.gps_sat_count   == original.gps_sat_count);
+    CHECK(decoded.flight_mode     == original.flight_mode);
+    CHECK(decoded.status_flags    == original.status_flags);
+
+    printf("Pass: test_telemetry_round_trip\n");
+
+}
+
+/* Test 6: Wire offsets and byte order, checked against ICD section 3
+ * rather than against the encoder's own behaviour. Distinctive values
+ * are chosen so each byte position is unambiguous. */
+void test_telemetry_wire_layout(void) {
+
+    uavlink_telemetry_t tm = make_telemetry();
+    tm.timestamp_ms  = 0x01020304;
+    tm.latitude      = 0x05060708;
+    tm.longitude     = 0x090A0B0C;
+    tm.altitude_amsl = 0x0D0E0F10;
+    tm.ground_speed  = 0x1112;
+
+    uint8_t buf[UAVLINK_TELEMETRY_PAYLOAD_SIZE];
+    CHECK(uavlink_encode_telemetry(&tm, buf, sizeof(buf)) == UAVLINK_OK);
+
+    /* timestamp_ms at offset 0 */
+    CHECK(buf[0] == 0x01); CHECK(buf[1] == 0x02);
+    CHECK(buf[2] == 0x03); CHECK(buf[3] == 0x04);
+
+    /* latitude at offset 4 */
+    CHECK(buf[4] == 0x05); CHECK(buf[5] == 0x06);
+    CHECK(buf[6] == 0x07); CHECK(buf[7] == 0x08);
+
+    /* longitude at offset 8 -- NOT altitude */
+    CHECK(buf[8]  == 0x09); CHECK(buf[9]  == 0x0A);
+    CHECK(buf[10] == 0x0B); CHECK(buf[11] == 0x0C);
+
+    /* altitude_amsl at offset 12 */
+    CHECK(buf[12] == 0x0D); CHECK(buf[13] == 0x0E);
+    CHECK(buf[14] == 0x0F); CHECK(buf[15] == 0x10);
+
+    /* ground_speed at offset 16 */
+    CHECK(buf[16] == 0x11); CHECK(buf[17] == 0x12);
+
+    /* single-byte fields */
+    CHECK(buf[28] == 87);
+    CHECK(buf[29] == UAVLINK_GPS_FIX_3D);
+    CHECK(buf[30] == 14);
+    CHECK(buf[31] == UAVLINK_MODE_AUTO);
+    CHECK(buf[32] == UAVLINK_STATUS_ARMED);
+
+    printf("Pass: test_telemetry_layout\n");
+}
+
 int main(void) {
     printf("=== Starting UAVLink Packet Tests ===\n");
     
@@ -143,6 +244,8 @@ int main(void) {
     test_byte_order();
     test_reserved_byte();
     test_rejection();
+    test_telemetry_round_trip();
+    test_telemetry_wire_layout();
 
     if (failures != 0) {
         fprintf(stderr, "=== %d check(s) FAILED ===\n", failures);
