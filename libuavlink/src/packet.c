@@ -1,5 +1,26 @@
 #include <uavlink/packet.h>
 
+static void put_u32(uint8_t *b, uint32_t v) {
+    b[0] = (uint8_t)(v >> 24);
+    b[1] = (uint8_t)(v >> 16);
+    b[2] = (uint8_t)(v >>  8);
+    b[3] = (uint8_t)(v);
+}
+
+static void put_u16(uint8_t *b, uint16_t v) {
+    b[0] = (uint8_t)(v >> 8);
+    b[1] = (uint8_t)(v);
+}
+
+static uint32_t get_u32(const uint8_t *b) {
+    return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16)
+         | ((uint32_t)b[2] <<  8) | ((uint32_t)b[3]);
+}
+
+static uint16_t get_u16(const uint8_t *b) {
+    return (uint16_t)(((uint16_t)b[0] << 8) | ((uint16_t)b[1]));
+}
+
 uavlink_result_t uavlink_encode_header(const uavlink_header_t *header, uint8_t *buf, size_t buf_len) {
 
     if (header == NULL || buf == NULL) {
@@ -123,6 +144,7 @@ uavlink_result_t uavlink_encode_telemetry(const uavlink_telemetry_t *tm, uint8_t
     buf[29] = tm->gps_fix_type;
     buf[30] = tm->gps_sat_count;
     buf[31] = tm->flight_mode;
+    buf[32] = tm->status_flags;
 
     return UAVLINK_OK;
 
@@ -130,17 +152,37 @@ uavlink_result_t uavlink_encode_telemetry(const uavlink_telemetry_t *tm, uint8_t
 
 uavlink_result_t uavlink_decode_telemetry(const uint8_t *buf, size_t buf_len, uavlink_telemetry_t *tm) {
 
-}
+    if (buf == NULL || tm == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
 
-static void put_u32(uint8_t *b, uint32_t v) {
-    b[0] = (uint8_t)(v >> 24);
-    b[1] = (uint8_t)(v >> 16);
-    b[2] = (uint8_t)(v >>  8);
-    b[3] = (uint8_t)(v);
-}
+    if (buf_len < UAVLINK_TELEMETRY_PAYLOAD_SIZE) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
 
-static void put_u16(uint8_t *b, uint16_t v) {
-    b[0] = (uint8_t)(v >> 8);
-    b[1] = (uint8_t)(v);
+    uavlink_telemetry_t tmp;
+    tmp.timestamp_ms = get_u32(&buf[0]);
+    tmp.latitude = (int32_t)get_u32(&buf[4]);
+    tmp.longitude = (int32_t)get_u32(&buf[8]);
+    tmp.altitude_amsl = (int32_t)get_u32(&buf[12]);
+    tmp.ground_speed = get_u16(&buf[16]);
+    tmp.vertical_speed = (int16_t)get_u16(&buf[18]);
+    tmp.heading = get_u16(&buf[20]);
+    tmp.roll = (int16_t)get_u16(&buf[22]);
+    tmp.pitch = (int16_t)get_u16(&buf[24]);
+    tmp.battery_voltage = get_u16(&buf[26]);
+    tmp.battery_pct = buf[28];
+    tmp.gps_fix_type = buf[29];
+    tmp.gps_sat_count = buf[30];
+    tmp.flight_mode = buf[31];
+    tmp.status_flags = buf[32];
+
+    if (tmp.flight_mode > UAVLINK_MODE_LANDED)   return UAVLINK_ERR_ENUM;
+
+    if (tmp.gps_fix_type > UAVLINK_GPS_FIX_RTK)  return UAVLINK_ERR_ENUM;
+
+    *tm = tmp;
+    return UAVLINK_OK;
+
 }
 

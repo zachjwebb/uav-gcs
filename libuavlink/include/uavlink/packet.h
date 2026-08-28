@@ -29,7 +29,7 @@ typedef enum {
     UAVLINK_ERR_CRC,            /* FMT-003 */
     UAVLINK_ERR_TRUNCATED,      /* declared length exceeds bytes supplied */
     UAVLINK_ERR_TRAILING_DATA,   /* extra bytes after declared length */
-    UAVLINK_ERR_ENUM             /* invalid enum value */
+    UAVLINK_ERR_ENUM,            /* invalid enum value */
 } uavlink_result_t;
 
 typedef enum {
