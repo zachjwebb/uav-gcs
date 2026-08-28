@@ -90,7 +90,6 @@ void test_byte_order(void) {
     CHECK(buf[4] == 0x03);
     CHECK(buf[5] == 0x04);
     
-    printf("Pass: test_byte_order\n");
 }
 
 /* Test 3: Reserved byte asymmetric handling
@@ -121,7 +120,6 @@ void test_reserved_byte(void) {
     CHECK(res == UAVLINK_OK);
     CHECK(decoded_hdr.version == 1);
     
-    printf("Pass: test_reserved_byte\n");
 }
 
 /* Test 4: Rejection and Error Bounds testing
@@ -156,7 +154,6 @@ void test_rejection(void) {
     uavlink_result_t truncate_res = uavlink_decode_header(buf, 59U, &dummy_decode);
     CHECK(truncate_res == UAVLINK_ERR_TRUNCATED);
     
-    printf("Pass: test_rejection\n");
 }
 
 /* Test 5: Telemetry round-trip.
@@ -189,8 +186,6 @@ void test_telemetry_round_trip(void) {
     CHECK(decoded.gps_sat_count   == original.gps_sat_count);
     CHECK(decoded.flight_mode     == original.flight_mode);
     CHECK(decoded.status_flags    == original.status_flags);
-
-    printf("Pass: test_telemetry_round_trip\n");
 
 }
 
@@ -235,7 +230,6 @@ void test_telemetry_wire_layout(void) {
     CHECK(buf[31] == UAVLINK_MODE_AUTO);
     CHECK(buf[32] == UAVLINK_STATUS_ARMED);
 
-    printf("Pass: test_telemetry_layout\n");
 }
 
 /* Test 7: Signed extremes. Two's-complement conversion bugs surface
@@ -250,7 +244,7 @@ void test_telemetry_signed_extremes(void) {
     tm.longitude = INT32_MIN;
     tm.altitude_amsl = INT32_MAX;
     tm.roll = INT16_MIN;
-    tm.pitch = INT16_MIN;
+    tm.pitch = INT16_MAX;
     tm.vertical_speed = -1;
 
     CHECK(uavlink_encode_telemetry(&tm, buf, sizeof(buf)) == UAVLINK_OK);
@@ -260,15 +254,13 @@ void test_telemetry_signed_extremes(void) {
     CHECK(decoded.longitude == INT32_MIN);
     CHECK(decoded.altitude_amsl == INT32_MAX);
     CHECK(decoded.roll == INT16_MIN);
-    CHECK(decoded.pitch == INT16_MIN);
+    CHECK(decoded.pitch == INT16_MAX);
     CHECK(decoded.vertical_speed == -1);
 
     CHECK(buf[4] == 0xFF);
     CHECK(buf[5] == 0xFF);
     CHECK(buf[6] == 0xFF);
     CHECK(buf[7] == 0xFF);
-
-    printf("Pass: test_telemetry_signed_extremes\n");
 
 }
 
@@ -291,8 +283,6 @@ void test_telemetry_bounds(void) {
     CHECK(uavlink_encode_telemetry(&tm, NULL, sizeof(exact))   == UAVLINK_ERR_NULL);
     CHECK(uavlink_decode_telemetry(NULL, sizeof(exact), &decoded) == UAVLINK_ERR_NULL);
     CHECK(uavlink_decode_telemetry(exact, sizeof(exact), NULL)    == UAVLINK_ERR_NULL);
-
-    printf("Pass: test_telemetry_bounds\n");
 
 }
 
@@ -327,8 +317,6 @@ void test_telemetry_enum_rejection(void) {
     CHECK(uavlink_decode_telemetry(buf, sizeof(buf), &out) == UAVLINK_ERR_ENUM);
     CHECK(out.latitude == (int32_t)0x5A5A5A5A);
 
-    printf("Pass: test_telemetry_enum_rejection\n");
-
 }
 
 int main(void) {
@@ -342,6 +330,7 @@ int main(void) {
     test_telemetry_wire_layout();
     test_telemetry_signed_extremes();
     test_telemetry_bounds();
+    test_telemetry_enum_rejection();
 
     if (failures != 0) {
         fprintf(stderr, "=== %d check(s) FAILED ===\n", failures);
