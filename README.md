@@ -146,30 +146,6 @@ review passes, lives in [`docs/ICD.md`](docs/ICD.md).
 
 ## Repository Structure
 
-> Proposed layout — update to match the actual repo if it differs.
-
-```
-uav-gcs/
-├── CMakeLists.txt
-├── README.md
-├── docs/
-│   ├── ICD.md              # Interface Control Document (wire protocol spec)
-│   └── architecture.md     # Design decisions and tradeoffs
-├── libuavlink/
-│   ├── include/uavlink/
-│   ├── src/
-│   └── tests/
-├── uav-sim/
-│   ├── include/
-│   └── src/
-├── gcs/
-│   ├── include/
-│   └── src/
-├── gcs-cmd/
-│   └── src/
-└── tests/
-    └── integration/
-```
 
 ## Building
 
