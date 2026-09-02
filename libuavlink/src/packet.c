@@ -1,4 +1,5 @@
 #include <uavlink/packet.h>
+#include <uavlink/crc.h>
 
 static void put_u32(uint8_t *b, uint32_t v) {
     b[0] = (uint8_t)(v >> 24);
@@ -19,6 +20,21 @@ static uint32_t get_u32(const uint8_t *b) {
 
 static uint16_t get_u16(const uint8_t *b) {
     return (uint16_t)(((uint16_t)b[0] << 8) | ((uint16_t)b[1]));
+}
+
+/**
+ * Internal helper to map message types to payload sizes.
+ * @return Payload size in bytes, or -1 if the type is unrecognized.
+ */
+static int32_t get_payload_size(uavlink_msg_type_t msg_type) {
+    switch (msg_type) {
+        case UAVLINK_MSG_TELEMETRY: return UAVLINK_TELEMETRY_PAYLOAD_SIZE;
+        case UAVLINK_MSG_COMMAND:   return UAVLINK_COMMAND_PAYLOAD_SIZE;
+        case UAVLINK_MSG_HEARTBEAT: return UAVLINK_HEARTBEAT_PAYLOAD_SIZE;
+        case UAVLINK_MSG_ACK:
+        case UAVLINK_MSG_NACK:  return UAVLINK_ACK_PAYLOAD_SIZE;
+        default: return -1;
+    }
 }
 
 uavlink_result_t uavlink_encode_header(const uavlink_header_t *header, uint8_t *buf, size_t buf_len) {
@@ -186,19 +202,166 @@ uavlink_result_t uavlink_decode_telemetry(const uint8_t *buf, size_t buf_len, ua
 
 }
 
-// uavlink_result_t uavlink_encode_command(const uavlink_command_t *cmd, uint8_t *buf, size_t buf_len);
+uavlink_result_t uavlink_encode_command(const uavlink_command_t *cmd, uint8_t *buf, size_t buf_len) {
 
-// uavlink_result_t uavlink_decode_command(const uint8_t *buf, size_t buf_len, uavlink_command_t *cmd);
+    if (buf == NULL || cmd == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
 
-// uavlink_result_t uavlink_encode_ack(const uavlink_ack_t *ack, uint8_t *buf, size_t buf_len);
+    if (buf_len < UAVLINK_COMMAND_PAYLOAD_SIZE) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
 
-// uavlink_result_t uavlink_decode_ack(const uint8_t *buf, size_t buf_len, uavlink_ack_t *ack);
+    if (cmd->cmd_type > UAVLINK_CMD_RTL) {
+        return UAVLINK_ERR_ENUM;
+    }
 
-//uavlink_result_t uavlink_encode_packet(const uavlink_packet_t *pkt, const uint8_t *buf, size_t buf_len, size_t *packet_len){
+    put_u32(&buf[0], cmd->session_id);
+    buf[4] = cmd->cmd_type;
+    put_u32(&buf[5], (uint32_t)cmd->param1);
+    put_u32(&buf[9], (uint32_t)cmd->param2);
+    put_u32(&buf[13], (uint32_t)cmd->param3);
+
+    return UAVLINK_OK;
+
+}
+
+uavlink_result_t uavlink_decode_command(const uint8_t *buf, size_t buf_len, uavlink_command_t *cmd) {
+
+    if (buf == NULL || cmd == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
+
+    if (buf_len < UAVLINK_COMMAND_PAYLOAD_SIZE) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
+
+    uavlink_command_t tmp;
+    tmp.session_id = get_u32(&buf[0]);
+    tmp.cmd_type = buf[4];
+    tmp.param1 = (int32_t)get_u32(&buf[5]);
+    tmp.param2 = (int32_t)get_u32(&buf[9]);
+    tmp.param3 = (int32_t)get_u32(&buf[13]);
+
+    if (tmp.cmd_type > UAVLINK_CMD_ARM || tmp.cmd_type > UAVLINK_CMD_RTL) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
+
+    *cmd = tmp;
+    return UAVLINK_OK;
+
+}
+
+uavlink_result_t uavlink_encode_ack(const uavlink_ack_t *ack, uint8_t *buf, size_t buf_len) {
+
+    if (buf == NULL || ack == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
+
+    if (buf_len < UAVLINK_ACK_PAYLOAD_SIZE) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
+
+    if (ack->reason_code > UAVLINK_ACK_INVALID_PARAM) {
+        return UAVLINK_ERR_ENUM;
+    }
+
+    put_u32(&buf[0], ack->session_id);
+    put_u32(&buf[4], ack->ack_seq);
+    buf[8] = ack->reason_code;
+
+    return UAVLINK_OK;
+
+}
+
+uavlink_result_t uavlink_decode_ack(const uint8_t *buf, size_t buf_len, uavlink_ack_t *ack) {
+
+    if (buf == NULL || ack == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
+
+    if (buf_len < UAVLINK_ACK_PAYLOAD_SIZE) {
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
+
+    uavlink_ack_t tmp;
+    tmp.session_id = get_u32(&buf[0]);
+    tmp.ack_seq = get_u32(&buf[4]);
+    tmp.reason_code = buf[8];
+
+    if (tmp.reason_code > UAVLINK_ACK_INVALID_PARAM) {
+        return UAVLINK_ERR_ENUM;
+    }
+
+    *ack = tmp;
+    return UAVLINK_OK;
+
+}
+
+uavlink_result_t uavlink_encode_packet(const uavlink_packet_t *pkt, uint8_t *buf, size_t buf_len, size_t *packet_len){
+
+    if (buf == NULL || pkt == NULL || packet_len == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
+
+    int32_t payload_size_res = get_payload_size(pkt->header.msg_type);
+    if (payload_size_res < 0) {
+        return UAVLINK_ERR_MSG_TYPE;
+    }
+
+    size_t payload_size = (size_t)payload_size_res;
+
+    size_t total_len = UAVLINK_HEADER_SIZE + payload_size + UAVLINK_CRC_SIZE;
+    if (buf_len < total_len){
+        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    }
 
 
+    uavlink_header_t hdr;
+    hdr.version = UAVLINK_VERSION;
+    hdr.msg_type = pkt->header.msg_type;
+    hdr.seq = pkt->header.seq;
+    hdr.payload_len = (uint8_t)payload_size;
 
-//}
+    uavlink_result_t hdr_res = uavlink_encode_header(&hdr, buf, buf_len);
+    if (hdr_res != UAVLINK_OK) {
+        return hdr_res;
+    }
+
+    uavlink_result_t payload_res = UAVLINK_OK;
+
+    switch (pkt->header.msg_type) {
+        case UAVLINK_MSG_TELEMETRY:
+            payload_res = uavlink_encode_telemetry(&pkt->payload.telemetry, buf + UAVLINK_HEADER_SIZE, payload_size);
+            break;
+        
+        case UAVLINK_MSG_COMMAND:
+            payload_res = uavlink_encode_command(&pkt->payload.command, buf + UAVLINK_HEADER_SIZE, payload_size);
+            break;
+
+        case UAVLINK_MSG_HEARTBEAT:
+            break;
+        
+        case UAVLINK_MSG_ACK:
+        case UAVLINK_MSG_NACK:
+            payload_res = uavlink_encode_ack(&pkt->payload.ack, buf + UAVLINK_HEADER_SIZE, payload_size);
+            break;
+        
+        default:
+            return UAVLINK_ERR_MSG_TYPE;
+    }
+
+    if (payload_res != UAVLINK_OK) {
+        return payload_res;
+    }
+
+    uint16_t crc_val = uavlink_crc16(buf, UAVLINK_HEADER_SIZE + payload_size);
+    put_u16(&buf[UAVLINK_HEADER_SIZE + payload_size], crc_val);
+
+    *packet_len = total_len;
+    return UAVLINK_OK;
+
+}
 
 //uavlink_result_t uavlink_decode_packet(const uint8_t *buf, size_t buf_len, uavlink_packet_t *pkt) {
 
