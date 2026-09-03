@@ -132,8 +132,8 @@ review passes, lives in [`docs/ICD.md`](docs/ICD.md).
 - [ ] **Phase 2 — `libuavlink` codec** *(in progress)*
   - [x] CRC-16-CCITT implementation, verified against the standard check value
   - [x] Header encoder/decoder with full validation and commit-on-success semantics
-  - [ ] Telemetry payload encoder/decoder
-  - [ ] Command, heartbeat, and ACK/NACK payload codecs
+  - [x] Telemetry payload encoder/decoder
+  - [x] Command, heartbeat, and ACK/NACK payload codecs
   - [ ] Full packet round-trip tests (header + payload + CRC)
 - [ ] **Phase 3 — `uav-sim`:** simulated vehicle, telemetry generation, UDP send loop
 - [ ] **Phase 4 — `gcs`:** telemetry receive/display, command dispatch
