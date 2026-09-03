@@ -4,6 +4,7 @@
 #include <string.h>
 #include <uavlink/packet.h>
 #include <limits.h>
+#include <uavlink/crc.h>
 
 static int failures = 0;
 
@@ -319,6 +320,200 @@ void test_telemetry_enum_rejection(void) {
 
 }
 
+static uavlink_command_t make_command(void) {
+    uavlink_command_t c = {
+        .session_id = 0xDEADBEEF,
+        .cmd_type   = UAVLINK_CMD_GOTO_WAYPOINT,
+        .param1     = 451234567,
+        .param2     = -1229876543,
+        .param3     = 12345
+    };
+    return c;
+}
+
+static uavlink_ack_t make_ack(void) {
+    uavlink_ack_t a = {
+        .session_id  = 0xDEADBEEF,
+        .ack_seq     = 77,
+        .reason_code = UAVLINK_ACK_ACCEPTED
+    };
+    return a;
+}
+
+/* Test 10: full-packet round-trip, all four message types.
+ * Expected totals come from ICD section 9. */
+static void test_packet_round_trip(void) {
+    uint8_t buf[UAVLINK_MAX_PACKET];
+    size_t len = 0;
+    uavlink_packet_t out;
+
+    /* TELEMETRY -- 43 bytes */
+    uavlink_packet_t tm_pkt;
+    memset(&tm_pkt, 0, sizeof(tm_pkt));
+    tm_pkt.header.msg_type = UAVLINK_MSG_TELEMETRY;
+    tm_pkt.header.seq      = 1001;
+    tm_pkt.payload.telemetry = make_telemetry();
+
+    CHECK(uavlink_encode_packet(&tm_pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    CHECK(len == 43);
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_OK);
+    CHECK(out.header.msg_type == UAVLINK_MSG_TELEMETRY);
+    CHECK(out.header.seq == 1001);
+    CHECK(out.header.payload_len == UAVLINK_TELEMETRY_PAYLOAD_SIZE);
+    CHECK(out.payload.telemetry.latitude == tm_pkt.payload.telemetry.latitude);
+    CHECK(out.payload.telemetry.longitude == tm_pkt.payload.telemetry.longitude);
+    CHECK(out.payload.telemetry.flight_mode == tm_pkt.payload.telemetry.flight_mode);
+
+    /* COMMAND -- 27 bytes */
+    uavlink_packet_t cmd_pkt;
+    memset(&cmd_pkt, 0, sizeof(cmd_pkt));
+    cmd_pkt.header.msg_type = UAVLINK_MSG_COMMAND;
+    cmd_pkt.header.seq      = 5;
+    cmd_pkt.payload.command = make_command();
+
+    CHECK(uavlink_encode_packet(&cmd_pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    CHECK(len == 27);
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_OK);
+    CHECK(out.payload.command.session_id == 0xDEADBEEF);
+    CHECK(out.payload.command.cmd_type == UAVLINK_CMD_GOTO_WAYPOINT);
+    CHECK(out.payload.command.param2 == -1229876543);
+
+    /* HEARTBEAT -- 10 bytes */
+    uavlink_packet_t hb_pkt;
+    memset(&hb_pkt, 0, sizeof(hb_pkt));
+    hb_pkt.header.msg_type = UAVLINK_MSG_HEARTBEAT;
+    hb_pkt.header.seq      = 42;
+
+    CHECK(uavlink_encode_packet(&hb_pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    CHECK(len == 10);
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_OK);
+    CHECK(out.header.payload_len == 0);
+    CHECK(out.header.seq == 42);
+
+    /* ACK and NACK -- 19 bytes each */
+    uavlink_packet_t ack_pkt;
+    memset(&ack_pkt, 0, sizeof(ack_pkt));
+    ack_pkt.header.msg_type = UAVLINK_MSG_ACK;
+    ack_pkt.header.seq      = 9;
+    ack_pkt.payload.ack     = make_ack();
+
+    CHECK(uavlink_encode_packet(&ack_pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    CHECK(len == 19);
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_OK);
+    CHECK(out.payload.ack.ack_seq == 77);
+
+    ack_pkt.header.msg_type = UAVLINK_MSG_NACK;
+    ack_pkt.payload.ack.reason_code = UAVLINK_ACK_ILLEGAL_TRANSITION;
+    CHECK(uavlink_encode_packet(&ack_pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    CHECK(len == 19);
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_OK);
+    CHECK(out.header.msg_type == UAVLINK_MSG_NACK);
+    CHECK(out.payload.ack.reason_code == UAVLINK_ACK_ILLEGAL_TRANSITION);
+}
+
+/* Test 11: CRC covers header AND payload (FMT-003). */
+static void test_packet_crc_rejection(void) {
+    uint8_t buf[UAVLINK_MAX_PACKET];
+    size_t len = 0;
+    uavlink_packet_t out;
+
+    uavlink_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type = UAVLINK_MSG_TELEMETRY;
+    pkt.header.seq      = 1;
+    pkt.payload.telemetry = make_telemetry();
+
+    /* payload corruption */
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    buf[20] ^= 0x01;
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_ERR_CRC);
+
+    /* header corruption -- fails if CRC covered payload only */
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    buf[3] ^= 0x01;
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_ERR_CRC);
+
+    /* CRC field itself corrupted */
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    buf[len - 1] ^= 0xFF;
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_ERR_CRC);
+}
+
+/* Test 12: per-type payload length check (ICD 8.7 step 5).
+ * CRC is recomputed so the length check is what fires, not the CRC check. */
+static void test_packet_wrong_payload_len(void) {
+    uint8_t buf[UAVLINK_MAX_PACKET];
+    size_t len = 0;
+    uavlink_packet_t out;
+
+    uavlink_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type = UAVLINK_MSG_TELEMETRY;
+    pkt.header.seq      = 1;
+    pkt.payload.telemetry = make_telemetry();
+
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+
+    buf[6] = 20;
+    uint16_t crc = uavlink_crc16(buf, UAVLINK_HEADER_SIZE + 20u);
+    buf[UAVLINK_HEADER_SIZE + 20] = (uint8_t)(crc >> 8);
+    buf[UAVLINK_HEADER_SIZE + 21] = (uint8_t)(crc & 0xFF);
+
+    size_t forged_len = (size_t)UAVLINK_HEADER_SIZE + 20u + UAVLINK_CRC_SIZE;
+    CHECK(uavlink_decode_packet(buf, forged_len, &out) == UAVLINK_ERR_LENGTH);
+}
+
+/* Test 13: truncation and trailing data. Run under ASan. */
+static void test_packet_length_mismatch(void) {
+    uint8_t buf[UAVLINK_MAX_PACKET];
+    size_t len = 0;
+    uavlink_packet_t out;
+
+    uavlink_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type = UAVLINK_MSG_TELEMETRY;
+    pkt.header.seq      = 1;
+    pkt.payload.telemetry = make_telemetry();
+
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+
+    CHECK(uavlink_decode_packet(buf, len - 1, &out) == UAVLINK_ERR_TRUNCATED);
+    CHECK(uavlink_decode_packet(buf, len + 1, &out) == UAVLINK_ERR_TRAILING_DATA);
+    CHECK(uavlink_decode_packet(buf, 5, &out) == UAVLINK_ERR_BUFFER_TOO_SMALL);
+
+    uint8_t tiny[UAVLINK_HEADER_SIZE];
+    size_t tiny_len = 0;
+    CHECK(uavlink_encode_packet(&pkt, tiny, sizeof(tiny), &tiny_len)
+          == UAVLINK_ERR_BUFFER_TOO_SMALL);
+
+    CHECK(uavlink_encode_packet(NULL, buf, sizeof(buf), &len) == UAVLINK_ERR_NULL);
+    CHECK(uavlink_encode_packet(&pkt, NULL, sizeof(buf), &len) == UAVLINK_ERR_NULL);
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), NULL) == UAVLINK_ERR_NULL);
+    CHECK(uavlink_decode_packet(NULL, len, &out) == UAVLINK_ERR_NULL);
+    CHECK(uavlink_decode_packet(buf, len, NULL) == UAVLINK_ERR_NULL);
+}
+
+/* Test 14: a rejected packet must not modify the caller's struct. */
+static void test_packet_commit_on_success(void) {
+    uint8_t buf[UAVLINK_MAX_PACKET];
+    size_t len = 0;
+
+    uavlink_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type = UAVLINK_MSG_TELEMETRY;
+    pkt.header.seq      = 1;
+    pkt.payload.telemetry = make_telemetry();
+
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    buf[20] ^= 0x01;
+
+    uavlink_packet_t out;
+    memset(&out, 0x5A, sizeof(out));
+    CHECK(uavlink_decode_packet(buf, len, &out) == UAVLINK_ERR_CRC);
+    CHECK(out.header.seq == 0x5A5A5A5A);
+    CHECK(out.payload.telemetry.latitude == (int32_t)0x5A5A5A5A);
+}
+
 int main(void) {
     printf("=== Starting UAVLink Packet Tests ===\n");
     
@@ -331,6 +526,12 @@ int main(void) {
     test_telemetry_signed_extremes();
     test_telemetry_bounds();
     test_telemetry_enum_rejection();
+    test_telemetry_enum_rejection();
+    test_packet_round_trip();
+    test_packet_crc_rejection();
+    test_packet_wrong_payload_len();
+    test_packet_length_mismatch();
+    test_packet_commit_on_success();
 
     if (failures != 0) {
         fprintf(stderr, "=== %d check(s) FAILED ===\n", failures);

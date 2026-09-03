@@ -243,8 +243,8 @@ uavlink_result_t uavlink_decode_command(const uint8_t *buf, size_t buf_len, uavl
     tmp.param2 = (int32_t)get_u32(&buf[9]);
     tmp.param3 = (int32_t)get_u32(&buf[13]);
 
-    if (tmp.cmd_type > UAVLINK_CMD_ARM || tmp.cmd_type > UAVLINK_CMD_RTL) {
-        return UAVLINK_ERR_BUFFER_TOO_SMALL;
+    if (tmp.cmd_type > UAVLINK_CMD_RTL) {
+        return UAVLINK_ERR_ENUM;
     }
 
     *cmd = tmp;
@@ -363,7 +363,66 @@ uavlink_result_t uavlink_encode_packet(const uavlink_packet_t *pkt, uint8_t *buf
 
 }
 
-//uavlink_result_t uavlink_decode_packet(const uint8_t *buf, size_t buf_len, uavlink_packet_t *pkt) {
+uavlink_result_t uavlink_decode_packet(const uint8_t *buf, size_t buf_len, uavlink_packet_t *pkt) {
 
-//}
+    if (buf == NULL || pkt == NULL) {
+        return UAVLINK_ERR_NULL;
+    }
+
+    uavlink_packet_t tmp;
+
+    uavlink_result_t hdr_res = uavlink_decode_header(buf, buf_len, &tmp.header);
+    if (hdr_res != UAVLINK_OK) {
+        return hdr_res;
+    }
+
+    int32_t payload_size = get_payload_size(tmp.header.msg_type);
+    if (payload_size < 0) {
+        return UAVLINK_ERR_MSG_TYPE;
+    }
+
+    size_t payload_len = (size_t)payload_size;
+
+    if (payload_len != tmp.header.payload_len) {
+        return UAVLINK_ERR_LENGTH;
+    }
+
+    uint16_t crc_val = uavlink_crc16(buf, UAVLINK_HEADER_SIZE + payload_len);
+    uint16_t crc_val_check = get_u16(&buf[UAVLINK_HEADER_SIZE + payload_len]);
+
+    if (crc_val != crc_val_check) {
+
+        return UAVLINK_ERR_CRC;
+    }
+
+    uavlink_result_t payload_res = UAVLINK_OK;
+
+    switch (tmp.header.msg_type) {
+        case UAVLINK_MSG_TELEMETRY:
+            payload_res = uavlink_decode_telemetry(buf + UAVLINK_HEADER_SIZE, payload_len, &tmp.payload.telemetry);
+            break;
+        
+        case UAVLINK_MSG_COMMAND:
+            payload_res = uavlink_decode_command(buf + UAVLINK_HEADER_SIZE, payload_len, &tmp.payload.command);
+            break;
+
+        case UAVLINK_MSG_HEARTBEAT:
+            break;
+        
+        case UAVLINK_MSG_ACK:
+        case UAVLINK_MSG_NACK:
+            payload_res = uavlink_decode_ack(buf + UAVLINK_HEADER_SIZE, payload_len, &tmp.payload.ack);
+            break;
+        
+        default:
+            return UAVLINK_ERR_MSG_TYPE;
+    }
+
+    if (payload_res != UAVLINK_OK) {
+        return payload_res;
+    }
+
+    *pkt = tmp;
+    return UAVLINK_OK;
+}
 
