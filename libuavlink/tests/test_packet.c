@@ -15,6 +15,15 @@ static int failures = 0;
     } \
 } while (0)
 
+static const uint8_t golden_telemetry[43] = {
+    0x01, 0x01, 0x00, 0x00, 0x03, 0xE9, 0x21, 0x00, 
+    0x07, 0x5B, 0xCD, 0x15, 0x1A, 0xE5, 0x4B, 0x07, 
+    0xB6, 0xB1, 0x92, 0xC1, 0x00, 0x00, 0x30, 0x39, 
+    0x06, 0x0E, 0xFF, 0x06, 0x69, 0xAA, 0xFA, 0x24, 
+    0x01, 0xF4, 0x56, 0xB8, 0x57, 0x02, 0x0E, 0x03, 
+    0x01, 0x21, 0xFC
+};
+
 /* ---- Telemetry test fixture: every field distinct ---- */
 static uavlink_telemetry_t make_telemetry(void) {
     uavlink_telemetry_t tm = {
@@ -514,9 +523,23 @@ static void test_packet_commit_on_success(void) {
     CHECK(out.payload.telemetry.latitude == (int32_t)0x5A5A5A5A);
 }
 
+static void test_golden_vector(void) {
+    uavlink_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.header.msg_type = UAVLINK_MSG_TELEMETRY;
+    pkt.header.seq      = 1001;
+    pkt.payload.telemetry = make_telemetry();
+
+    uint8_t buf[UAVLINK_MAX_PACKET];
+    size_t len = 0;
+    CHECK(uavlink_encode_packet(&pkt, buf, sizeof(buf), &len) == UAVLINK_OK);
+    CHECK(len == sizeof(golden_telemetry));
+    CHECK(memcmp(buf, golden_telemetry, sizeof(golden_telemetry)) == 0);
+}
+
 int main(void) {
     printf("=== Starting UAVLink Packet Tests ===\n");
-    
+
     test_round_trip();
     test_byte_order();
     test_reserved_byte();
