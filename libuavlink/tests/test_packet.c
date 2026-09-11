@@ -540,6 +540,7 @@ static void test_golden_vector(void) {
 int main(void) {
     printf("=== Starting UAVLink Packet Tests ===\n");
 
+    test_golden_vector();
     test_round_trip();
     test_byte_order();
     test_reserved_byte();
