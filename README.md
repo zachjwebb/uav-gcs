@@ -1,6 +1,6 @@
 # uav-gcs — UAV Ground Control Station Simulator
 
-**Status:** 🚧 Work in progress — Phase 2 (protocol codec) in development
+**Status:** Work in progress — Phase 3 (protocol codec) in development
 
 A simulated ground control station (GCS) system for an unmanned aerial vehicle,
 built from scratch in C99/C++17 to explore the kinds of engineering problems
@@ -134,7 +134,7 @@ review passes, lives in [`docs/ICD.md`](docs/ICD.md).
   - [x] Header encoder/decoder with full validation and commit-on-success semantics
   - [x] Telemetry payload encoder/decoder
   - [x] Command, heartbeat, and ACK/NACK payload codecs
-  - [ ] Full packet round-trip tests (header + payload + CRC)
+  - [x] Full packet round-trip tests (header + payload + CRC)
 - [ ] **Phase 3 — `uav-sim`:** simulated vehicle, telemetry generation, UDP send loop
 - [ ] **Phase 4 — `gcs`:** telemetry receive/display, command dispatch
 - [ ] **Phase 5 — `gcs-cmd`:** command-line uplink tool
